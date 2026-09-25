@@ -42,6 +42,11 @@ alter table public.clients enable row level security;
 alter table public.procedures enable row level security;
 alter table public.sales enable row level security;
 
+grant select, insert, update, delete on public.appointments to authenticated;
+grant select, insert, update, delete on public.clients to authenticated;
+grant select, insert, update, delete on public.procedures to authenticated;
+grant select, insert, update, delete on public.sales to authenticated;
+
 do $$
 begin
   execute 'drop policy if exists "authenticated users can read appointments" on public.appointments';
@@ -65,6 +70,8 @@ create policy "authenticated users can write sales" on public.sales for all to a
 
 do $$
 begin
-  alter publication supabase_realtime add table public.appointments;
-exception when duplicate_object then null;
+  begin alter publication supabase_realtime add table public.appointments; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.clients; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.procedures; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.sales; exception when duplicate_object then null; end;
 end $$;

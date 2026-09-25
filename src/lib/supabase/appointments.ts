@@ -20,6 +20,12 @@ type AppointmentRow = {
   status: AppointmentStatus;
 };
 
+export function describeSupabaseError(error: unknown) {
+  if (!error || typeof error !== "object") return "erro desconhecido";
+  const details = error as { code?: string; message?: string; details?: string; hint?: string };
+  return [details.code, details.message, details.details, details.hint].filter(Boolean).join(" | ") || "erro desconhecido";
+}
+
 function mapAppointment(row: AppointmentRow): AppointmentRecord {
   return { id: row.id, date: row.appointment_date, time: row.appointment_time.slice(0, 5), client: row.client, service: row.service, status: row.status };
 }

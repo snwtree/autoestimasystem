@@ -5,7 +5,7 @@ import type React from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Check, Clock3, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { insertAppointment, listAppointments, removeAppointment, subscribeToAppointments, unsubscribeFromAppointments, updateAppointmentStatus } from "@/lib/supabase/appointments";
+import { describeSupabaseError, insertAppointment, listAppointments, removeAppointment, subscribeToAppointments, unsubscribeFromAppointments, updateAppointmentStatus } from "@/lib/supabase/appointments";
 import { saveSale } from "@/lib/supabase/data";
 
 type AppointmentStatus = "agendado" | "confirmado" | "em andamento" | "concluido";
@@ -93,8 +93,9 @@ export default function AgendaPage() {
     if (!clientExists || !procedureExists) setFormWarning(`${!clientExists ? "Cliente não cadastrada" : "Cliente cadastrada"}${!clientExists && !procedureExists ? " e " : ""}${!procedureExists ? "procedimento não cadastrado" : ""}. O horário será salvo mesmo assim.`);
     try {
       await insertAppointment({ date: selectedDate, ...form, client: form.client.trim(), service: form.service.trim() });
-    } catch {
-      setFormWarning("Não foi possível salvar no banco compartilhado. Verifique o schema e as políticas do Supabase.");
+    } catch (error) {
+      console.error("appointment insert failed", error);
+      setFormWarning(`Não foi possível salvar no banco compartilhado: ${describeSupabaseError(error)}`);
       return;
     }
     setIsModalOpen(false);
