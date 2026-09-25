@@ -65,6 +65,11 @@ export async function deleteSale(id: string) {
   if (error) throw error;
 }
 
+export async function deleteSaleByAppointmentId(appointmentId: string) {
+  const { error } = await createClient().from("sales").delete().eq("appointment_id", appointmentId);
+  if (error) throw error;
+}
+
 export async function clearTable(table: "clients" | "procedures" | "sales") {
   const { error } = await createClient().from(table).delete().not("id", "is", null);
   if (error) throw error;

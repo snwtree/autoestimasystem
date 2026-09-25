@@ -342,5 +342,16 @@ body {
     padding: 5mm !important;
     border: 1px solid #000 !important;
   }
+
+  .print-report section,
+  .print-report article {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-report svg {
+    display: block !important;
+    max-width: 100% !important;
+  }
 }
 
