@@ -5,10 +5,11 @@ import type React from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Check, Clock3, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { insertAppointment, listAppointments, removeAppointment, subscribeToAppointments, unsubscribeFromAppointments, updateAppointmentStatus } from "@/lib/supabase/appointments";
+import { saveSale } from "@/lib/supabase/data";
 
 type AppointmentStatus = "agendado" | "confirmado" | "em andamento" | "concluido";
 type Appointment = { id: string; date: string; time: string; client: string; service: string; status: AppointmentStatus };
-type StoredSale = { id: string; amount: number; client: string; service: string; date: string };
 
 const today = new Date().toISOString().slice(0, 10);
 const statusStyles: Record<AppointmentStatus, string> = {
@@ -42,13 +43,28 @@ export default function AgendaPage() {
   const [procedureNames, setProcedureNames] = useState<string[]>([]);
 
   useEffect(() => {
+    let mounted = true;
+    const loadAppointments = async () => {
+      try {
+        const remoteAppointments = await listAppointments();
+        if (mounted) setAppointments(remoteAppointments);
+      } catch {
+        if (mounted) setAppointments(readList<Appointment>("autoestima-appointments"));
+      }
+      if (mounted) setAppointmentsLoaded(true);
+    };
+    const channel = subscribeToAppointments(() => { void loadAppointments(); });
     const timer = window.setTimeout(() => {
-      setAppointments(readList<Appointment>("autoestima-appointments"));
+      void loadAppointments();
       setAppointmentsLoaded(true);
       setClientNames(readList<{ name: string }>("autoestima-clients").map((item) => item.name));
       setProcedureNames(readList<{ name: string }>("autoestima-procedures").map((item) => item.name));
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timer);
+      void unsubscribeFromAppointments(channel);
+    };
   }, []);
 
   useEffect(() => {
@@ -71,29 +87,46 @@ export default function AgendaPage() {
     setIsModalOpen(true);
   }
 
-  function createAppointment(event: React.FormEvent<HTMLFormElement>) {
+  async function createAppointment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.client.trim() || !form.service.trim()) return;
     if (!clientExists || !procedureExists) setFormWarning(`${!clientExists ? "Cliente não cadastrada" : "Cliente cadastrada"}${!clientExists && !procedureExists ? " e " : ""}${!procedureExists ? "procedimento não cadastrado" : ""}. O horário será salvo mesmo assim.`);
-    setAppointments((current) => [...current, { id: crypto.randomUUID(), date: selectedDate, ...form, client: form.client.trim(), service: form.service.trim() }]);
+    try {
+      await insertAppointment({ date: selectedDate, ...form, client: form.client.trim(), service: form.service.trim() });
+    } catch {
+      setFormWarning("Não foi possível salvar no banco compartilhado. Verifique o schema e as políticas do Supabase.");
+      return;
+    }
     setIsModalOpen(false);
   }
 
-  function cycleStatus(id: string) {
+  async function cycleStatus(id: string) {
     const statuses: AppointmentStatus[] = ["agendado", "confirmado", "em andamento"];
-    setAppointments((current) => current.map((item) => item.id === id ? { ...item, status: statuses[(statuses.indexOf(item.status) + 1) % statuses.length] } : item));
+    const appointment = appointments.find((item) => item.id === id);
+    if (!appointment) return;
+    try {
+      await updateAppointmentStatus(id, statuses[(statuses.indexOf(appointment.status) + 1) % statuses.length]);
+    } catch {
+      setFormWarning("Não foi possível atualizar este atendimento no banco compartilhado.");
+    }
   }
 
-  function finalizeAppointment(event: React.FormEvent<HTMLFormElement>) {
+  async function finalizeAppointment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number(saleAmount.replace(",", "."));
     if (!saleAppointment || !Number.isFinite(amount) || amount <= 0) return;
-    const stored = readList<StoredSale>("autoestima-sales");
-    if (stored.some((sale) => sale.id === saleAppointment.id)) return;
-    window.localStorage.setItem("autoestima-sales", JSON.stringify([...stored, { id: saleAppointment.id, amount, client: saleAppointment.client, service: saleAppointment.service, date: saleAppointment.date }]));
-    const remainingAppointments = appointments.filter((item) => item.id !== saleAppointment.id);
-    window.localStorage.setItem("autoestima-appointments", JSON.stringify(remainingAppointments));
-    setAppointments(remainingAppointments);
+    try {
+      await saveSale({ appointment_id: saleAppointment.id, amount, client: saleAppointment.client, service: saleAppointment.service, date: saleAppointment.date });
+    } catch {
+      setFormWarning("Não foi possível registrar a venda no banco compartilhado.");
+      return;
+    }
+    try {
+      await removeAppointment(saleAppointment.id);
+    } catch {
+      setFormWarning("Não foi possível concluir o atendimento no banco compartilhado.");
+      return;
+    }
     setSaleAppointment(null);
     setSaleAmount("");
     router.push("/administracao");

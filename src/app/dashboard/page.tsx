@@ -6,6 +6,8 @@ import { ArrowUpRight, CalendarDays, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { getSessionProfile } from "@/lib/auth/profile";
+import { listAppointments, subscribeToAppointments, unsubscribeFromAppointments } from "@/lib/supabase/appointments";
+import { listSales, subscribeToTable, unsubscribeFromTable } from "@/lib/supabase/data";
 
 export default function DashboardPage() {
   const [name, setName] = useState("Usuário");
@@ -16,28 +18,29 @@ export default function DashboardPage() {
 
   useEffect(() => {
     createClient().auth.getUser().then(({ data }) => setName(getSessionProfile(data.user?.email, data.user?.user_metadata?.display_name).name));
-    const update = () => {
+    let active = true;
+    const update = async () => {
       const now = new Date();
       setGreeting(now.getHours() < 12 ? "Bom dia" : now.getHours() < 18 ? "Boa tarde" : "Boa noite");
       setDateLabel(new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(now));
       try {
-        const storedAppointments = JSON.parse(window.localStorage.getItem("autoestima-appointments") ?? "[]") as Array<{ date: string; time: string; client: string; service: string; status: string }>;
-        setTodayAppointments(storedAppointments.filter((item) => item.date === now.toISOString().slice(0, 10)).sort((a, b) => a.time.localeCompare(b.time)));
+        const remoteAppointments = await listAppointments();
+        if (active) setTodayAppointments(remoteAppointments.filter((item) => item.date === now.toISOString().slice(0, 10)).sort((a, b) => a.time.localeCompare(b.time)));
       } catch {
-        setTodayAppointments([]);
+        if (active) setTodayAppointments([]);
+      }
+      try {
+        const remoteSales = await listSales();
+        if (active) setSales(remoteSales.filter((sale) => sale.date === now.toISOString().slice(0, 10)).reduce((total, sale) => total + sale.amount, 0));
+      } catch {
+        if (active) setSales(0);
       }
     };
-    update();
-    const timer = window.setInterval(update, 60000);
-    const salesTimer = window.setTimeout(() => {
-      try {
-        const stored = window.localStorage.getItem("autoestima-sales");
-        setSales(stored ? (JSON.parse(stored) as Array<{ amount: number }>).reduce((total, sale) => total + sale.amount, 0) : 0);
-      } catch {
-        setSales(0);
-      }
-    }, 0);
-    return () => { window.clearInterval(timer); window.clearTimeout(salesTimer); };
+    void update();
+    const appointmentChannel = subscribeToAppointments(() => { void update(); });
+    const salesChannel = subscribeToTable("sales", () => { void update(); });
+    const timer = window.setInterval(() => { void update(); }, 60000);
+    return () => { active = false; window.clearInterval(timer); void unsubscribeFromAppointments(appointmentChannel); void unsubscribeFromTable(salesChannel); };
   }, []);
 
   const stats = [

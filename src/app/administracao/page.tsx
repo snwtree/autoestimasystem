@@ -4,25 +4,37 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, BarChart3, Download, RotateCcw, TrendingUp } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { deleteSale, listSales, subscribeToTable, unsubscribeFromTable, type SaleRecord } from "@/lib/supabase/data";
 
-type Sale = { id: string; amount: number; client: string; service: string; date: string };
+type Sale = SaleRecord;
 type ChartType = "bars" | "donut" | "list";
 
 export default function AdministracaoPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [message, setMessage] = useState("");
   const [chartType, setChartType] = useState<ChartType>("bars");
-  useEffect(() => { const stored = window.localStorage.getItem("autoestima-sales"); const timer = window.setTimeout(() => { if (stored) setSales(JSON.parse(stored) as Sale[]); }, 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const remoteSales = await listSales();
+        if (active) setSales(remoteSales);
+      } catch {
+        const stored = window.localStorage.getItem("autoestima-sales");
+        if (active && stored) setSales(JSON.parse(stored) as Sale[]);
+      }
+    };
+    const channel = subscribeToTable("sales", () => { void load(); });
+    void load();
+    return () => { active = false; void unsubscribeFromTable(channel); };
+  }, []);
   const total = sales.reduce((sum, sale) => sum + sale.amount, 0);
   const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const metrics = [["Faturamento total", money(total)], ["Atendimentos", String(sales.length)], ["Ticket médio", sales.length ? money(total / sales.length) : money(0)], ["Vendas finalizadas", String(sales.length)]];
 
-  function reverseSale(sale: Sale) {
-    const remaining = sales.filter((item) => item.id !== sale.id);
-    window.localStorage.setItem("autoestima-sales", JSON.stringify(remaining));
-    const appointments = JSON.parse(window.localStorage.getItem("autoestima-appointments") ?? "[]") as Array<{ id: string; status: string }>;
-    window.localStorage.setItem("autoestima-appointments", JSON.stringify(appointments.map((item) => item.id === sale.id ? { ...item, status: "confirmado" } : item)));
-    setSales(remaining);
+  async function reverseSale(sale: Sale) {
+    await deleteSale(sale.id);
+    setSales((current) => current.filter((item) => item.id !== sale.id));
     setMessage(`Venda de ${sale.client} revertida.`);
   }
 

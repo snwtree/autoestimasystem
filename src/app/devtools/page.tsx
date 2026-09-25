@@ -4,24 +4,26 @@ import { useState } from "react";
 import type React from "react";
 import { Code2, Database, Download, RefreshCw, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { clearAppointments, insertAppointment, listAppointments } from "@/lib/supabase/appointments";
+import { clearTable, listClients, listProcedures, listSales, saveClient, saveProcedure, saveSale } from "@/lib/supabase/data";
 
 export default function DevToolsPage() {
   const [message, setMessage] = useState("");
   const [backupPeriod, setBackupPeriod] = useState("weekly");
 
-  function clearAgenda() {
-    window.localStorage.removeItem("autoestima-appointments");
-    setMessage("Dados locais da agenda removidos. Recarregue a agenda para restaurar os dados iniciais.");
+  async function clearAgenda() {
+    await Promise.all([clearAppointments(), clearTable("sales"), clearTable("clients"), clearTable("procedures")]);
+    setMessage("Dados compartilhados removidos do banco. Recarregue as telas para atualizar.");
   }
 
-  function exportAppBackup() {
+  async function exportAppBackup() {
     const backup = {
       exportedAt: new Date().toISOString(),
       period: backupPeriod,
-      appointments: JSON.parse(window.localStorage.getItem("autoestima-appointments") ?? "[]"),
-      sales: JSON.parse(window.localStorage.getItem("autoestima-sales") ?? "[]"),
-      clients: JSON.parse(window.localStorage.getItem("autoestima-clients") ?? "[]"),
-      procedures: JSON.parse(window.localStorage.getItem("autoestima-procedures") ?? "[]"),
+      appointments: await listAppointments(),
+      sales: await listSales(),
+      clients: await listClients(),
+      procedures: await listProcedures(),
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -30,20 +32,24 @@ export default function DevToolsPage() {
     link.download = `autoestima-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
-    setMessage("Backup local exportado. O arquivo foi salvo fora do Supabase e pode ser restaurado nesta tela.");
+    setMessage("Backup completo exportado. O arquivo foi salvo fora do Supabase e pode ser restaurado nesta tela.");
   }
 
   function restoreAppBackup(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const backup = JSON.parse(String(reader.result)) as Record<string, unknown>;
         const collections = ["appointments", "sales", "clients", "procedures"];
         if (!collections.every((key) => Array.isArray(backup[key]))) throw new Error("Formato inválido");
-        collections.forEach((key) => window.localStorage.setItem(`autoestima-${key}`, JSON.stringify(backup[key])));
-        setMessage("Backup restaurado localmente. Recarregue as telas para visualizar os dados.");
+        await Promise.all([clearAppointments(), clearTable("sales"), clearTable("clients"), clearTable("procedures")]);
+        await Promise.all((backup.clients as Array<{ name: string; phone: string; email: string }>).map((client) => saveClient({ name: client.name, phone: client.phone, email: client.email })));
+        await Promise.all((backup.procedures as Array<{ name: string; price?: number }>).map((procedure) => saveProcedure({ name: procedure.name, price: procedure.price })));
+        await Promise.all((backup.appointments as Array<{ date: string; time: string; client: string; service: string; status: "agendado" | "confirmado" | "em andamento" | "concluido" }>).map((appointment) => insertAppointment(appointment)));
+        await Promise.all((backup.sales as Array<{ appointment_id?: string; amount: number; client: string; service: string; date: string }>).map((sale) => saveSale(sale)));
+        setMessage("Backup completo restaurado no banco compartilhado. Recarregue as telas para atualizar.");
       } catch {
         setMessage("Não foi possível restaurar o arquivo. Selecione um backup JSON válido do Autoestima.");
       }
